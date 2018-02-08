@@ -5,13 +5,13 @@ from gym.envs.registration import register
 
 register(
     id='EchoEnvContinuous-v0',
-    entry_point='mylib.rl.common.echo_env:EchoEnv',
+    entry_point='mylib.ppo_pytorch.common.echo_env:EchoEnv',
     kwargs={'continuous': True},
 )
 
 register(
     id='EchoEnvDiscrete-v0',
-    entry_point='mylib.rl.common.echo_env:EchoEnv',
+    entry_point='mylib.ppo_pytorch.common.echo_env:EchoEnv',
     kwargs={'continuous': False},
 )
 

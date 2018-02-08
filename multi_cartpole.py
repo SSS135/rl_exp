@@ -5,7 +5,7 @@ from gym.envs.registration import register
 
 register(
     id='MultiCartPole-v1',
-    entry_point='mylib.rl.common.multi_cartpole:MultiCartPole',
+    entry_point='mylib.ppo_pytorch.common.multi_cartpole:MultiCartPole',
     kwargs={'num_envs': 3, 'base_env': 'CartPole-v1'},
     max_episode_steps=500,
     reward_threshold=475.0,
