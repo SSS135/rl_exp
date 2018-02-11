@@ -2,9 +2,9 @@ import pprint
 from itertools import count
 
 import gym
-from mylib.rl.common.tensorboard_env_logger import TensorboardEnvLogger
-from rl.experimental.frame_skip_env import FrameSkipEnv
-from rl.experimental.observation_norm_env import ObservationNormalizer
+from mylib.ppo_pytorch.common.tensorboard_env_logger import TensorboardEnvLogger
+from ppo_pytorch.experimental.frame_skip_env import FrameSkipEnv
+from ppo_pytorch.experimental.observation_norm_env import ObservationNormalizer
 
 
 class MultiplayerGymWrapper:

@@ -1,7 +1,7 @@
 import numpy as np
 # from mylib.optfn.kl_div import kl_div
 
-from mylib.rl.common.rl_base import RLBase
+from mylib.ppo_pytorch.common.rl_base import RLBase
 
 
 class MCTS(RLBase):

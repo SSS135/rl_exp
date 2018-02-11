@@ -3,7 +3,7 @@ from itertools import count
 
 import gym
 import numpy as np
-from rl.experimental.parallel_env import ParallelEnv
+from ppo_pytorch.experimental.parallel_env import ParallelEnv
 
 Sample = namedtuple('EnvSample', 'states, actions, rewards, next_states, values, dones, meta')
 

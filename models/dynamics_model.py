@@ -2,7 +2,7 @@ from functools import partial
 from itertools import chain
 
 import torch
-from rl.common.probability_distributions import make_pd
+from ppo_pytorch.common.probability_distributions import make_pd
 from torch import nn as nn
 from torch.nn import functional as F
 

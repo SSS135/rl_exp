@@ -7,9 +7,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.optim.lr_scheduler
-from rl.common import RLBase
-from rl.common import ValueDecay
-from rl.models import MLPActionValues
+from ppo_pytorch.common import RLBase
+from ppo_pytorch.common import ValueDecay
+from ppo_pytorch.models import MLPActionValues
 from torch.autograd import Variable
 from torch.nn.utils.clip_grad import clip_grad_norm
 from torchvision.utils import make_grid

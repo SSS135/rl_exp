@@ -3,8 +3,8 @@ from functools import partial
 
 import numpy as np
 import torch
-from mylib.rl.common import InvSNES, RLBase
-from rl.models.models import MLPActor
+from mylib.ppo_pytorch.common import InvSNES, RLBase
+from ppo_pytorch.models.models import MLPActor
 from torch import nn as nn
 from torch.autograd import Variable
 

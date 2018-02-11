@@ -2,9 +2,9 @@ import math
 from itertools import chain
 
 import torch
-from rl.common.make_grid import make_grid
-from rl.models.actors import Actor, ActorOutput
-from rl.models.utils import image_to_float, make_conv_heatmap
+from ppo_pytorch.common.make_grid import make_grid
+from ppo_pytorch.models.actors import Actor, ActorOutput
+from ppo_pytorch.models.utils import image_to_float, make_conv_heatmap
 from torch import nn as nn, autograd as autograd
 from torch.autograd import Variable
 

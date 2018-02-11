@@ -1,8 +1,8 @@
 from functools import partial
 
 import torch.optim as optim
-from rl.common import DecayLR
-from rl.models import MLPActor, ActionValuesHead
+from ppo_pytorch.common import DecayLR
+from ppo_pytorch.models import MLPActor, ActionValuesHead
 from torch import nn as nn
 
 
