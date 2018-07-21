@@ -204,7 +204,7 @@ class GanCNNActor(Actor):
 
     def log_policy_attention(self, states, head_out):
         states_grad = autograd.grad(
-            head_out.probs.abs().mean() + head_out.state_values.abs().mean(), states,
+            head_out.probs.abs().mean() + head_out.state_value.abs().mean(), states,
             only_inputs=True, retain_graph=True)[0]
         img = states_grad.data[:4]
         img.abs_()
