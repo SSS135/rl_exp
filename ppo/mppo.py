@@ -10,7 +10,8 @@ import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 import random
 
-from .ppo import PPO, barron_loss
+from ppo_pytorch.ppo import PPO
+from ppo_pytorch.common.barron_loss import barron_loss
 
 
 def spectral_init(module, gain=nn.init.calculate_gain('leaky_relu', 0.1), n_power_iterations=1):
