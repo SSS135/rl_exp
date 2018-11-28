@@ -262,8 +262,8 @@ class MPPO(PPO):
                 # real_head = self.model(hidden_code[1:].view(-1, hidden_code.shape[-1]), hidden_code_input=True)
                 real_probs = real_head.probs.detach().view(-1, states.shape[1], *real_head.probs.shape[1:])
                 gen_probs = gen_head.probs.view(-1, states.shape[1], *gen_head.probs.shape[1:])
-                real_values = real_head.state_value.detach().view(-1, states.shape[1])
-                gen_values = gen_head.state_value.view(-1, states.shape[1])
+                real_values = real_head.state_values.detach().view(-1, states.shape[1])
+                gen_values = gen_head.state_values.view(-1, states.shape[1])
                 head_q_loss = huber_quantile_loss(gen_probs, real_probs[1:], tau_prob) + \
                               huber_quantile_loss(gen_values, real_values[1:], tau_value)
 
@@ -328,9 +328,9 @@ class MPPO(PPO):
                 with torch.enable_grad():
                     head_out = self.model(cur_hc, hidden_code_input=True)
                     actions = self.model.pd.sample(head_out.probs)
-                    all_values.append(head_out.state_value)
+                    all_values.append(head_out.state_values)
                 target_head_out = self.target_net(cur_hc, hidden_code_input=True)
-                all_target_values.append(target_head_out.state_value)
+                all_target_values.append(target_head_out.state_values)
                 if h != horizon:
                     cur_hc, gen_rewards, gen_dones, cur_mem = self.world_gen(
                         cur_hc, actions, cur_mem, tau[h], init_mem if h == 0 else None)
@@ -438,8 +438,8 @@ class MPPO(PPO):
                         real_dones, gen_dones, real_rewards, gen_rewards, actions):
         head_real = self.model(real_next_hidden, hidden_code_input=True)
         head_gen = self.model(gen_next_hidden, hidden_code_input=True)
-        real_values, real_probs = head_real.state_value, head_real.probs
-        gen_values, gen_probs = head_gen.state_value, head_gen.probs
+        real_values, real_probs = head_real.state_values, head_real.probs
+        gen_values, gen_probs = head_gen.state_values, head_gen.probs
         rmse = lambda a, b: (a - b).abs().mean().item()
         state_norm_rmse = rmse(gen_next_hidden, real_next_hidden) / max(0.01, rmse(real_cur_hidden, real_next_hidden))
         self.logger.add_scalar(f'gen {tag} raw prob err', rmse(real_probs, gen_probs), self.frame)

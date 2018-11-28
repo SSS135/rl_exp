@@ -150,7 +150,7 @@ class MPPO(UPPO):
         loss_g += F.binary_cross_entropy_with_logits(fake_d, one)
         loss_g += 0.5 * (1 - fake_d.clamp(max=1)).pow_(2).mean()
         loss_g += 0.5 * F.mse_loss(fake_head.probs, real_head.probs.detach())
-        loss_g += F.mse_loss(fake_head.state_value, real_head.state_value.detach())
+        loss_g += F.mse_loss(fake_head.state_values, real_head.state_values.detach())
         # loss_g += F.mse_loss(fake_next_state, next_state)
         # loss_g += 0.33 * F.mse_loss(fake_reward, reward)
         # loss_g += 0.33 * F.mse_loss(fake_done, done)
@@ -172,7 +172,7 @@ class MPPO(UPPO):
             self.logger.add_scalar('dyn state diff mae', state_diff, self.frame)
             self.logger.add_scalar('dyn done mae', done_mae, self.frame)
 
-            value_mae = (real_head.state_value - fake_head.state_value).abs_().mean()
+            value_mae = (real_head.state_values - fake_head.state_values).abs_().mean()
             ratio = (torch.max(logp_fake, logp_real) - torch.min(logp_fake, logp_real)).exp().mean()
 
             self.logger.add_scalar('dyn head value mae', value_mae, self.frame)

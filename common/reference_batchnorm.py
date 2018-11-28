@@ -42,7 +42,7 @@ def forward_with_ref_batch(module, input):
     if input is not None:
         from ..models.actors import ActorOutput
         if isinstance(out, ActorOutput):
-            out = ActorOutput(probs=out.probs[:input.shape[0]], state_value=out.state_value[:input.shape[0]])
+            out = ActorOutput(probs=out.probs[:input.shape[0]], state_values=out.state_values[:input.shape[0]])
         return out
 
 

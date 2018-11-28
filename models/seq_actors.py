@@ -213,7 +213,7 @@ class HSeqActor(Actor):
         head_l1 = self.head(preact_l1)
 
         next_memory = torch.cat([next_memory_l1, next_memory_l2], 0)
-        # head_l1.state_value = head_l1.state_value * 0
+        # head_l1.state_values = head_l1.state_values * 0
 
         return head_l1, head_l2, action_l2, cur_l1, target_l1, next_memory
 

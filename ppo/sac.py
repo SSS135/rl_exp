@@ -8,7 +8,7 @@ class SAC(PPO):
 
     @staticmethod
     def head_factory(hidden_size, pd):
-        return dict(probs=PolicyHead(hidden_size, pd), state_value=StateValueHead(hidden_size),
+        return dict(probs=PolicyHead(hidden_size, pd), state_values=StateValueHead(hidden_size),
                     action_value=StateValueHead(hidden_size))
 
 
