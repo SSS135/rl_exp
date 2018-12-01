@@ -35,14 +35,13 @@ def set_lr_scale(optim: torch.optim.Optimizer, scale):
 
 def l1_quantile_loss(output, target, tau, reduce=True):
     u = target - output
-    loss = (tau - (u.detach() <= 0).float()).mul_(2).mul_(u)
-
+    loss = (tau - (u.detach() <= 0).float()).mul_(u)
     return loss.mean() if reduce else loss
 
 
 def huber_quantile_loss(output, target, tau, k=0.05, reduce=True):
     u = target - output
-    loss = (tau - (u.detach() <= 0).float()).mul_(2 * u.detach().abs().clamp(max=k).div_(k)).mul_(u)
+    loss = (tau - (u.detach() <= 0).float()).mul_(u.detach().abs().clamp(max=k).div_(k)).mul_(u)
     return loss.mean() if reduce else loss
 
 
@@ -279,7 +278,7 @@ class MPPO(PPO):
                 gen_q_loss = gen_q_loss.mean() + 0.2 * head_q_loss.mean() #+ 0.2 * gen_mse_loss.mean()
             gen_q_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.world_gen.parameters(), 20)
-            self.optimizer.zero_grad()
+            self._optimizer.zero_grad()
             self.world_gen_optim.step()
             self.world_gen_optim.zero_grad()
 
@@ -366,8 +365,8 @@ class MPPO(PPO):
             loss.backward()
             if self.grad_clip_norm is not None:
                 clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
-            self.optimizer.step()
-            self.optimizer.zero_grad()
+            self._optimizer.step()
+            self._optimizer.zero_grad()
 
     def get_generator_init_params(self, init_states, horizon, num_actors):
         prob_len = self.model.pd.prob_vector_len

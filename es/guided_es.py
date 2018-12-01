@@ -32,7 +32,7 @@ class GES(PPO):
         self._es_rewards = []
         # (P, n) noise matrix
         self._noise = None
-        self._orig_model_weights = deepcopy(list(self.model.state_dict().values()))
+        self._orig_model_weights = deepcopy(list(self._train_model.state_dict().values()))
 
         self.value_loss_scale = 0
 
@@ -43,7 +43,7 @@ class GES(PPO):
         actions = super()._step(prev_states, rewards, dones, cur_states)
 
         if len(self._es_rewards) != 0:
-            ent = self.model.pd.entropy(torch.tensor(self._steps_processor.probs[-1])).item() if len(self._steps_processor.probs) != 0 else 0
+            ent = self._train_model.pd.entropy(torch.tensor(self._steps_processor.probs[-1])).item() if len(self._steps_processor.probs) != 0 else 0
             self._es_rewards[-1] += reward * self.reward_scale + self.entropy_reward_scale * ent
 
         if self._grad_buffer is not None and done:
@@ -63,7 +63,7 @@ class GES(PPO):
         # (n) vector
         grad = self.es_lr / (2 * self.es_std * self.steps_per_update) * (fitness @ self._noise)
         # print('es grad', grad.pow(2).mean().sqrt(), fitness)
-        weights = list(self.model.state_dict().values())
+        weights = list(self._train_model.state_dict().values())
         w_lens = [w.numel() for w in weights]
         for curw, g, origw in zip(weights, grad.split(w_lens, 0), self._orig_model_weights):
             origw += g.view_as(origw)
@@ -80,15 +80,15 @@ class GES(PPO):
         return super()._process_sample_tensors(rewards, values_old, *args, **kwargs)
 
     def _ppo_update(self, data: TrainingData):
-        cur_weights = deepcopy(list(self.model.state_dict().values()))
-        for src, dst in zip(self._orig_model_weights, self.model.state_dict().values()):
+        cur_weights = deepcopy(list(self._train_model.state_dict().values()))
+        for src, dst in zip(self._orig_model_weights, self._train_model.state_dict().values()):
             dst.copy_(src)
         super()._ppo_update(data)
         grads = []
-        for prev, new in zip(self._orig_model_weights, self.model.state_dict().values()):
+        for prev, new in zip(self._orig_model_weights, self._train_model.state_dict().values()):
             grads.append(new - prev)
             new.copy_(prev)
-        for src, dst in zip(cur_weights, self.model.state_dict().values()):
+        for src, dst in zip(cur_weights, self._train_model.state_dict().values()):
             dst.copy_(src)
         self._update_grad_buffer(grads)
 
@@ -119,7 +119,7 @@ class GES(PPO):
 
     def _set_next_model_weights(self):
         weights = self._weights_to_test.pop(0)
-        for src, dst in zip(weights, self.model.state_dict().values()):
+        for src, dst in zip(weights, self._train_model.state_dict().values()):
             dst.copy_(src)
 
     def _update_grad_buffer(self, new_grads):
