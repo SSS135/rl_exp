@@ -78,10 +78,10 @@ class DQN(RLBase):
     def num_actors(self):
         return self.eval_batch_size
 
-    def _step(self, prev_states, rewards, dones, cur_states):
+    def _step(self, rewards, dones, states):
         self._check_log()
 
-        states = Variable(torch.from_numpy(cur_states), volatile=True)
+        states = Variable(torch.from_numpy(states), volatile=True)
         if self.cuda_eval:
             states = states.cuda()
             self.net = self.net.cuda()
@@ -101,7 +101,7 @@ class DQN(RLBase):
         self.actions = actions
 
         if prev_states is not None:
-            replay_next_states = [(None if d else s) for s, d in zip(cur_states, dones)]
+            replay_next_states = [(None if d else s) for s, d in zip(states, dones)]
             self.replay_buffer.push(prev_states, prev_actions, replay_next_states, rewards)
 
         if self.step % self.train_interval == 0 and \

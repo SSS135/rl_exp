@@ -36,11 +36,11 @@ class GES(PPO):
 
         self.value_loss_scale = 0
 
-    def _step(self, prev_states, rewards, dones, cur_states) -> np.ndarray:
+    def _step(self, rewards, dones, states) -> np.ndarray:
         reward = rewards[0] if rewards is not None else 0
         done = dones[0] if dones is not None else False
 
-        actions = super()._step(prev_states, rewards, dones, cur_states)
+        actions = super()._step(rewards, dones, states)
 
         if len(self._es_rewards) != 0:
             ent = self._train_model.pd.entropy(torch.tensor(self._steps_processor.probs[-1])).item() if len(self._steps_processor.probs) != 0 else 0

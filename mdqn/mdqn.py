@@ -122,8 +122,8 @@ class MDQN(RLBase):
     def num_actors(self):
         return self._num_actors
 
-    def _step(self, prev_states, rewards, dones, cur_states):
-        states = Variable(torch.from_numpy(cur_states), volatile=True)
+    def _step(self, rewards, dones, states):
+        states = Variable(torch.from_numpy(states), volatile=True)
         if self.cuda_run:
             states = states.cuda()
             self.policy_model = self.policy_model.cuda()
@@ -143,7 +143,7 @@ class MDQN(RLBase):
         self.actions = actions
 
         if prev_states is not None:
-            replay_next_states = [(None if d else s) for s, d in zip(cur_states, dones)]
+            replay_next_states = [(None if d else s) for s, d in zip(states, dones)]
             self.replay_buffer.push(prev_states, prev_actions, replay_next_states, rewards)
 
         if self.step % self.target_network_update_interval == 0:
