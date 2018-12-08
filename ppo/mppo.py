@@ -9,6 +9,7 @@ from optfn.spectral_norm import SpectralNorm
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 import random
+from optfn.iqn_loss import huber_quantile_loss, l1_quantile_loss
 
 from ppo_pytorch.ppo import PPO
 from ppo_pytorch.common.barron_loss import barron_loss
@@ -31,18 +32,6 @@ def update_spectral_norm(net: nn.Module):
 def set_lr_scale(optim: torch.optim.Optimizer, scale):
     for group in optim.param_groups:
         group['lr'] = scale * optim.defaults['lr']
-
-
-def l1_quantile_loss(output, target, tau, reduce=True):
-    u = target - output
-    loss = (tau - (u.detach() <= 0).float()).mul_(u)
-    return loss.mean() if reduce else loss
-
-
-def huber_quantile_loss(output, target, tau, k=0.05, reduce=True):
-    u = target - output
-    loss = (tau - (u.detach() <= 0).float()).mul_(u.detach().abs().clamp(max=k).div_(k)).mul_(u)
-    return loss.mean() if reduce else loss
 
 
 class GanG(nn.Module):
