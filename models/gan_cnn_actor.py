@@ -3,8 +3,8 @@ from itertools import chain
 
 import torch
 from ppo_pytorch.common.make_grid import make_grid
-from ppo_pytorch.models.actors import ModularActor, ActorOutput
-from ppo_pytorch.models.utils import image_to_float, make_conv_heatmap
+from ppo_pytorch.actors.actors import ModularActor, ActorOutput
+from ppo_pytorch.actors.utils import image_to_float, make_conv_heatmap
 from torch import nn as nn, autograd as autograd
 from torch.autograd import Variable
 

@@ -9,7 +9,7 @@ import torch.optim as optim
 import torch.optim.lr_scheduler
 from ppo_pytorch.common import RLBase
 from ppo_pytorch.common import ValueDecay
-from ppo_pytorch.models import MLPActionValues
+from ppo_pytorch.actors import MLPActionValues
 from torch.autograd import Variable
 from torch.nn.utils.clip_grad import clip_grad_norm
 from torchvision.utils import make_grid

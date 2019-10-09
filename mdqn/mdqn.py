@@ -11,7 +11,7 @@ from ppo_pytorch.common import RLBase
 from ppo_pytorch.common import ValueDecay
 from ppo_pytorch.common.multi_dataset import MultiDataset
 from ppo_pytorch.experimental.dqn import ReplayBuffer
-from ppo_pytorch.models import MLPActionValues, DynamicsModel
+from ppo_pytorch.actors import MLPActionValues, DynamicsModel
 from sklearn.metrics import precision_recall_fscore_support
 from torch.autograd import Variable
 from torch.nn.utils.clip_grad import clip_grad_norm

@@ -11,7 +11,7 @@ from torch.nn.utils import clip_grad_norm_
 import random
 from optfn.iqn_loss import huber_quantile_loss, l1_quantile_loss
 
-from ppo_pytorch.ppo import PPO
+from ppo_pytorch.algs import PPO
 from ppo_pytorch.common.barron_loss import barron_loss
 
 

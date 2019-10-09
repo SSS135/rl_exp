@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.autograd
 
-from ppo_pytorch.ppo.ppo import PPO, TrainingData
+from ppo_pytorch.algs.ppo import PPO, TrainingData
 
 
 class GES(PPO):
@@ -124,7 +124,7 @@ class GES(PPO):
 
     def _update_grad_buffer(self, new_grads):
         new_grads = torch.cat([g.view(-1) for g in new_grads], dim=0)
-        # print('ppo grad', new_grads.pow(2).mean().sqrt())
+        # print('algs grad', new_grads.pow(2).mean().sqrt())
         if self._grad_buffer is None:
             self._grad_buffer = new_grads.new_zeros((self.grad_buffer_len, new_grads.numel()))
         self._grad_buffer[self._grad_buffer_index] = new_grads
