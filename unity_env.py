@@ -45,11 +45,11 @@ class UnityEnv(MultiplayerEnv):
         return states, brain.rewards, brain.local_done, [{}] * self.num_players
 
     def _get_action_space(self, brain_params: BrainParameters):
-        assert len(brain_params.vector_action_space_size) == 1
-        return self._create_space(brain_params.vector_action_space_type, brain_params.vector_action_space_size[0])
+        type, size = brain_params.vector_action_space_type, brain_params.vector_action_space_size
+        return self._create_space(type, size)
 
     def _get_observation_space(self, brain_params: BrainParameters):
-        return self._create_space('continuous', brain_params.vector_observation_space_size * brain_params.num_stacked_vector_observations)
+        return self._create_space('continuous', [brain_params.vector_observation_space_size * brain_params.num_stacked_vector_observations])
 
     def _process_action(self, action):
         return action
@@ -59,10 +59,11 @@ class UnityEnv(MultiplayerEnv):
 
     def _create_space(self, type, size):
         if type == 'continuous':
-            high = np.ones(size)
+            assert len(size) == 1
+            high = np.ones(size[0])
             return gym.spaces.Box(-high, high)
         else:
-            return gym.spaces.Discrete(size)
+            return gym.spaces.MultiDiscrete(size) if len(size) > 1 else gym.spaces.Discrete(size[0])
 
     def close(self):
         self.env.close()
