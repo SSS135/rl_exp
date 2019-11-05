@@ -1,33 +1,31 @@
+import os
+import random
 import time
+from functools import partial
 
 import gym
 import gym.spaces
 import numpy as np
-from unityagents import UnityEnvironment, BrainInfo, BrainParameters
+from mlagents.envs.exception import UnityWorkerInUseException
+from ppo_pytorch.common.env_factory import NamedVecEnv, SimpleVecEnv, Monitor, ObservationNorm
+from mlagents.envs.environment import UnityEnvironment, BrainInfo, BrainParameters, AllBrainInfo
 
 
 class UnityEnv(gym.Env):
-    def __init__(self, env_name, use_states=True, *args, **kwargs):
-        self.use_states = use_states
-        self.env = UnityEnvironment(env_name, *args, **kwargs)
-        time.sleep(2) # FIXME: otherwise env.reset may freeze
-        assert self.env.number_brains == 1
-        brain_params: BrainParameters = self.env.brains[self.env.brain_names[0]]
+    def __init__(self, env_name, *args, **kwargs):
+        self.env = UnityEnvironment(env_name, *args, base_port=10000, **kwargs)
+        self.env.reset()
+        assert self.env.number_external_brains == 1, self.env.number_external_brains
+        brain_params = self.env.brains[self.env.external_brain_names[0]]
         self.observation_space = self._get_observation_space(brain_params)
         self.action_space = self._get_action_space(brain_params)
         self.reward_range = (-1, 1)
 
     def step(self, action, *args, **kwargs):
-        return self._step(action, *args, **kwargs)
-
-    def reset(self, *args, **kwargs):
-        return self._reset(*args, **kwargs)
-
-    def _step(self, action, *args, **kwargs):
         state = self.env.step(self._process_action(action), *args, **kwargs)
         return self._next(state)
 
-    def _reset(self, *args, **kwargs):
+    def reset(self, *args, **kwargs):
         state = self.env.reset(*args, **kwargs)
         return self._next(state)[0]
 
@@ -37,18 +35,19 @@ class UnityEnv(gym.Env):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
-    def _next(self, env_state):
-        assert len(env_state) == 1
+    def _next(self, env_state: AllBrainInfo):
+        assert len(env_state) == 1, env_state
         brain: BrainInfo = next(iter(env_state.values()))
-        assert len(brain.agents) == 1
-        states = brain.states if self.use_states else brain.observations
+        assert len(brain.agents) == 1, brain.agents
+        states = brain.vector_observations
         return self._process_state(states[0]), brain.rewards[0], brain.local_done[0], {}
 
     def _get_action_space(self, brain_params: BrainParameters):
-        return self._create_space(brain_params.action_space_type, brain_params.action_space_size)
+        assert len(brain_params.vector_action_space_size) == 1
+        return self._create_space(brain_params.vector_action_space_type, brain_params.vector_action_space_size[0])
 
     def _get_observation_space(self, brain_params: BrainParameters):
-        return self._create_space(brain_params.state_space_type, brain_params.state_space_size)
+        return self._create_space('continuous', brain_params.vector_observation_space_size * brain_params.num_stacked_vector_observations)
 
     def _process_action(self, action):
         return action
@@ -67,29 +66,25 @@ class UnityEnv(gym.Env):
         self.env.close()
 
 
-# class MultiplayerUnityEnv(MultiplayerEnv):
-#     def __init__(self, env_name, use_states=True):
-#         self.use_states = use_states
-#         self.env = UnityEnvironment(env_name)
-#         assert self.env.number_brains == 1
-#
-#         brain_params: BrainParameters = self.env.brains[self.env.brain_names[0]]
-#         brain_info: BrainInfo = self.env.reset()
-#
-#         super().__init__(len(brain_info.agents))
-#         #self.observation_space = gym.spaces.Box brain_params.state_space_type == 'continuous'
-#
-#     def _step(self, action):
-#         return self._next(self.env.step(action))
-#
-#     def _reset(self):
-#         return self._next(self.env.reset())[0]
-#
-#     def _next(self, env_state):
-#         assert len(env_state) == 1
-#         brain: BrainInfo = next(iter(env_state.values()))
-#         d = np.array(brain.local_done)
-#         assert np.all(d) or np.all(1 - d)
-#         states = brain.states if self.use_states else brain.observations
-#         return states, brain.rewards, brain.local_done[0], {}
+class UnityVecEnv(SimpleVecEnv):
+    def __init__(self, env_path, observation_norm=False, parallel='thread'):
+        self.env_path = env_path
+        env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
+        super().__init__(env_name, observation_norm, parallel)
+
+    def get_env_fn(self):
+        def make(env_path, observation_norm):
+            while True:
+                worker_id = random.randrange(50000)
+                try:
+                    env = UnityEnv(env_path, worker_id=worker_id)
+                    break
+                except UnityWorkerInUseException:
+                    print(f'Worker {worker_id} already in use')
+            env = Monitor(env)
+            if observation_norm:
+                env = ObservationNorm(env)
+            return env
+
+        return partial(make, self.env_path, self.observation_norm)
 
