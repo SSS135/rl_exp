@@ -26,7 +26,7 @@ class UnityEnv(MultiplayerEnv):
         super().__init__(len(brain.agents))
 
     def step(self, action, *args, **kwargs):
-        state = self.env.step(self._process_action(action), *args, **kwargs)
+        state = self.env.step(action, *args, **kwargs)
         return self._process_brain_info(state)
 
     def reset(self, *args, **kwargs):
@@ -42,8 +42,10 @@ class UnityEnv(MultiplayerEnv):
     def _process_brain_info(self, env_state: AllBrainInfo):
         assert len(env_state) == 1, env_state
         brain: BrainInfo = next(iter(env_state.values()))
-        obs = brain.visual_observations[0] if self.visual_observations else brain.vector_observations
-        states = [self._process_state(s if self.visual_observations else s) for s in obs]
+        if self.visual_observations:
+            states = np.asarray(np.asarray(brain.visual_observations[0]) * 255, dtype=np.uint8)
+        else:
+            states = brain.vector_observations
         return states, brain.rewards, brain.local_done, [{}] * self.num_players
 
     def _get_action_space(self, brain_params: BrainParameters, info: BrainInfo):
@@ -51,16 +53,13 @@ class UnityEnv(MultiplayerEnv):
         return self._create_space(type, size)
 
     def _get_observation_space(self, brain_params: BrainParameters, info: BrainInfo):
-        high = np.ones(np.shape(info.visual_observations)[-3:]) \
-            if self.visual_observations \
-            else np.ones(brain_params.vector_observation_space_size * brain_params.num_stacked_vector_observations)
-        return gym.spaces.Box(-high, high)
-
-    def _process_action(self, action):
-        return action
-
-    def _process_state(self, state):
-        return state
+        if self.visual_observations:
+            assert brain_params.number_visual_observations == 1
+            zeros = np.zeros(np.shape(info.visual_observations)[-3:])
+            return gym.spaces.Box(zeros, zeros + 255)
+        else:
+            size = brain_params.vector_observation_space_size * brain_params.num_stacked_vector_observations
+            return self._create_space('continuous', [size])
 
     def _create_space(self, type, size):
         if type == 'continuous':
