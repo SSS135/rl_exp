@@ -6,11 +6,11 @@ import torch.nn.functional as F
 
 
 class NoisyLinear(nn.Module):
-    def __init__(self, in_features, out_features, noise_std=0.017, bias=True):
+    def __init__(self, in_features, out_features, noise_scale=0.2, bias=True):
         super(NoisyLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.noise_std = noise_std
+        self.noise_scale = noise_scale
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
         self.weight_std = nn.Parameter(torch.Tensor(out_features, in_features))
         if bias:
@@ -30,16 +30,22 @@ class NoisyLinear(nn.Module):
         with torch.no_grad():
             std = math.sqrt(3 / self.weight.size(1))
             self.weight.uniform_(-std, std)
-            self.weight_std.fill_(self.noise_std)
+            self.weight_std.fill_(self.noise_scale * std)
             if self.bias is not None:
                 self.bias.zero_()
-                self.bias_std.fill_(self.noise_std)
+                self.bias_std.fill_(self.noise_scale * std)
 
     def randomize_noise(self):
         with torch.no_grad():
             self.weight_noise.normal_()
             if self.bias is not None:
                 self.bias_noise.normal_()
+
+    @staticmethod
+    def randomize_network(net: nn.Module):
+        for m in net.modules():
+            if isinstance(m, NoisyLinear):
+                m.randomize_noise()
 
     def forward(self, input):
         weight = self.weight + self.weight_std * self.weight_noise
