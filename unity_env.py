@@ -57,7 +57,7 @@ class UnityEnv(MultiplayerEnv):
         if self.visual_observations:
             assert brain_params.number_visual_observations == 1
             zeros = np.zeros(np.shape(info.visual_observations)[-3:])
-            return gym.spaces.Box(zeros, zeros + 255)
+            return gym.spaces.Box(zeros, zeros + 255, dtype=np.uint8)
         else:
             size = brain_params.vector_observation_space_size * brain_params.num_stacked_vector_observations
             return self._create_space('continuous', [size])
