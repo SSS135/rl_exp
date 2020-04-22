@@ -76,7 +76,7 @@ class UnityEnv(MultiplayerEnv):
 
 
 class UnityVecEnv(NamedVecEnv):
-    def __init__(self, env_path, parallel='thread', visual_observations=False, observation_norm=False, stacked_frames=4, train_mode=True):
+    def __init__(self, env_path, parallel='thread', visual_observations=False, observation_norm=False, stacked_frames=1, train_mode=True):
         self.env_path = env_path
         self.visual_observations = visual_observations
         self.train_mode = train_mode
