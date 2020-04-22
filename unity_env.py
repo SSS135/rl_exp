@@ -10,6 +10,7 @@ import numpy as np
 from ppo_pytorch.common.multiplayer_env import MultiplayerEnv
 from mlagents.envs.exception import UnityWorkerInUseException
 from ppo_pytorch.common.env_factory import NamedVecEnv, SimpleVecEnv, Monitor, ObservationNorm, ChannelTranspose
+from ppo_pytorch.common.atari_wrappers import FrameStack
 from mlagents.envs.environment import UnityEnvironment, BrainInfo, BrainParameters, AllBrainInfo
 
 
@@ -75,12 +76,13 @@ class UnityEnv(MultiplayerEnv):
 
 
 class UnityVecEnv(NamedVecEnv):
-    def __init__(self, env_path, parallel='thread', visual_observations=False, observation_norm=False, train_mode=True):
+    def __init__(self, env_path, parallel='thread', visual_observations=False, observation_norm=False, stacked_frames=4, train_mode=True):
         self.env_path = env_path
         self.visual_observations = visual_observations
         self.train_mode = train_mode
         env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
         self.observation_norm = observation_norm
+        self.stacked_frames = stacked_frames
         self.env_name = env_name
         self.parallel = parallel
         self.envs = None
@@ -94,7 +96,7 @@ class UnityVecEnv(NamedVecEnv):
         env.close()
 
     def get_env_factory(self):
-        def make(env_path, observation_norm, visual_observations, train_mode=True):
+        def make(env_path, observation_norm, visual_observations, stacked_frames, train_mode):
             while True:
                 worker_id = random.randrange(50000)
                 try:
@@ -104,13 +106,16 @@ class UnityVecEnv(NamedVecEnv):
                 except UnityWorkerInUseException:
                     print(f'Worker {worker_id} already in use')
             env = Monitor(env)
-            if self.visual_observations:
+            if visual_observations:
                 env = ChannelTranspose(env)
+            if stacked_frames > 1:
+                assert visual_observations
+                env = FrameStack(env, 4)
             if observation_norm:
                 env = ObservationNorm(env)
             return env
 
-        return partial(make, self.env_path, self.observation_norm, self.visual_observations, self.train_mode)
+        return partial(make, self.env_path, self.observation_norm, self.visual_observations, self.stacked_frames, self.train_mode)
 
     def set_num_envs(self, num_envs):
         assert num_envs % self.num_players == 0, (num_envs, self.num_players)
