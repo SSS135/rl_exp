@@ -115,6 +115,10 @@ class InvSNES:
 
     @staticmethod
     def _get_ranks(n):
-        indexes = np.arange(1, n + 1)
-        ranks = np.maximum(0, np.log(n / 2 + 1) - np.log(indexes))
-        return ranks / ranks.sum() - 1 / n
+        lin = np.exp(np.linspace(1, -1, n) * 3)
+        lin = lin - np.mean(lin)
+        lin = lin / np.std(lin) * 0.1
+        return lin
+        # indexes = np.arange(1, n + 1)
+        # ranks = np.maximum(0, np.log(n / 2 + 1) - np.log(indexes))
+        # return ranks / ranks.sum() - 1 / n
