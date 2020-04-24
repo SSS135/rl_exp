@@ -1,32 +1,21 @@
 import copy
 import pprint
-from asyncio import Future
-from concurrent.futures import ThreadPoolExecutor
-from enum import Enum
 from functools import partial
-from typing import Optional
 
 import numpy as np
 import torch
 import torch.autograd
 import torch.optim as optim
-from ppo_pytorch.algs.ppo import SchedulerManager, copy_state_dict, log_training_data
+from ppo_pytorch.algs.ppo import SchedulerManager, log_training_data
 from torch.nn.utils import clip_grad_norm_
 
 from ppo_pytorch.algs.replay_buffer import ReplayBuffer
-from ppo_pytorch.algs.utils import RunningNorm, scaled_impala_loss
-from ppo_pytorch.algs.utils import v_mpo_loss
 from ppo_pytorch.actors import create_ppo_fc_actor, Actor
-from ppo_pytorch.actors.activation_norm import activation_norm_loss
 from ppo_pytorch.actors.utils import model_diff
 from ppo_pytorch.algs.utils import lerp_module_
 from ppo_pytorch.common.attr_dict import AttrDict
-from ppo_pytorch.common.barron_loss import barron_loss
 from ppo_pytorch.common.data_loader import DataLoader
-from ppo_pytorch.common.gae import calc_vtrace, calc_value_targets
-from ppo_pytorch.common.pop_art import PopArt
 from ppo_pytorch.common.rl_base import RLBase
-from rl_exp.inv_snes import InvSNES
 
 
 def wiener(dt=0.1, x0=0, decay=0.95, n=100):
