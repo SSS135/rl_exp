@@ -4,19 +4,20 @@ import numpy as np
 import torch
 import torch.autograd
 
-from ppo_pytorch.algs.ppo import PPO, TrainingData
+from ppo_pytorch.algs.impala import IMPALA, AttrDict, copy_state_dict
 
 
-class GES(PPO):
+class GuidedES(IMPALA):
     def __init__(self, *args,
                  grad_buffer_len=32,
                  steps_per_update=1,
                  es_lr=0.01,
                  es_std=0.01,
-                 es_blend=0,
+                 es_blend=0.0,
                  **kwargs):
         super().__init__(*args, **kwargs)
         assert self.num_actors == 1
+        assert steps_per_update == 1
         self.grad_buffer_len = grad_buffer_len
         self.steps_per_update = steps_per_update
         self.es_lr = es_lr
@@ -34,17 +35,17 @@ class GES(PPO):
         self._noise = None
         self._orig_model_weights = deepcopy(list(self._train_model.state_dict().values()))
 
-        self.value_loss_scale = 0
+        # self.value_loss_scale = 0
 
-    def _step(self, rewards, dones, states) -> np.ndarray:
+    def _step(self, rewards, dones, states) -> torch.Tensor:
         reward = rewards[0] if rewards is not None else 0
         done = dones[0] if dones is not None else False
 
         actions = super()._step(rewards, dones, states)
 
         if len(self._es_rewards) != 0:
-            ent = self._train_model.pd.entropy(torch.tensor(self._steps_processor.probs[-1])).item() if len(self._steps_processor.probs) != 0 else 0
-            self._es_rewards[-1] += reward * self.reward_scale + self.entropy_reward_scale * ent
+            # ent = self._eval_model.heads.logits.pd.entropy(torch.tensor(self._steps_processor.data.logits[-1])).item() if len(self._steps_processor.data.logits) != 0 else 0
+            self._es_rewards[-1] += reward * self.reward_scale #+ self.entropy_reward_scale * ent
 
         if self._grad_buffer is not None and done:
             if len(self._weights_to_test) == 0:
@@ -68,22 +69,23 @@ class GES(PPO):
         for curw, g, origw in zip(weights, grad.split(w_lens, 0), self._orig_model_weights):
             origw += g.view_as(origw)
             curw.copy_(origw)
+        copy_state_dict(self._train_model, self._eval_model)
 
         if self._do_log:
-            self.logger.add_scalar('es grad rms', grad.pow(2).mean().sqrt(), self.frame)
-            self.logger.add_scalar('es buffer rms', self._grad_buffer.pow(2).mean().sqrt(), self.frame)
-            self.logger.add_scalar('es fitness rms', fitness.pow(2).mean().sqrt(), self.frame)
+            self.logger.add_scalar('es grad rms', grad.pow(2).mean().sqrt(), self.frame_train)
+            self.logger.add_scalar('es buffer rms', self._grad_buffer.pow(2).mean().sqrt(), self.frame_train)
+            self.logger.add_scalar('es fitness rms', fitness.pow(2).mean().sqrt(), self.frame_train)
 
-    def _process_sample_tensors(
-            self, rewards, values_old, *args, **kwargs):
-        values_old.data.fill_(0)
-        return super()._process_sample_tensors(rewards, values_old, *args, **kwargs)
+    def _create_data(self):
+        data = super()._create_data()
+        data.state_values.fill_(0)
+        return data
 
-    def _ppo_update(self, data: TrainingData):
+    def _impala_update(self, data: AttrDict):
         cur_weights = deepcopy(list(self._train_model.state_dict().values()))
         for src, dst in zip(self._orig_model_weights, self._train_model.state_dict().values()):
             dst.copy_(src)
-        super()._ppo_update(data)
+        super()._impala_update(data)
         grads = []
         for prev, new in zip(self._orig_model_weights, self._train_model.state_dict().values()):
             grads.append(new - prev)
@@ -96,20 +98,19 @@ class GES(PPO):
         assert len(self._weights_to_test) == 0
 
         weights = list(self._orig_model_weights)
-        w_lens = [w.numel() for w in weights]
+        w_sizes = [w.numel() for w in weights]
 
         self._noise = self._get_noise()
 
-        for noises in zip(*self._noise.split(w_lens, dim=1)):
+        for noises in zip(*self._noise.split(w_sizes, dim=1)):
             self._weights_to_test.append([w + e.view_as(w) for (e, w) in zip(noises, weights)])
             self._weights_to_test.append([w - e.view_as(w) for (e, w) in zip(noises, weights)])
 
     def _get_noise(self):
         """Generates (P, n) noise matrix"""
-        buf = self._grad_buffer
-        k, n = buf.shape
-        full_space_noise = buf.new_zeros(self.steps_per_update, n).normal_()
-        subspace_noise = buf.new_zeros(self.steps_per_update, k).normal_() @ buf
+        buf_len, grad_len = self._grad_buffer.shape
+        full_space_noise = self._grad_buffer.new_zeros(self.steps_per_update, grad_len).normal_()
+        subspace_noise = self._grad_buffer.new_zeros(self.steps_per_update, buf_len).normal_() @ self._grad_buffer
         subspace_noise /= subspace_noise.pow(2).mean().sqrt()
         full_space_noise *= self.es_std * self.es_blend
         subspace_noise *= self.es_std * (1 - self.es_blend)
@@ -121,6 +122,7 @@ class GES(PPO):
         weights = self._weights_to_test.pop(0)
         for src, dst in zip(weights, self._train_model.state_dict().values()):
             dst.copy_(src)
+        copy_state_dict(self._train_model, self._eval_model)
 
     def _update_grad_buffer(self, new_grads):
         new_grads = torch.cat([g.view(-1) for g in new_grads], dim=0)
