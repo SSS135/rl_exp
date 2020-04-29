@@ -127,14 +127,14 @@ class UnityVecEnv(NamedVecEnv):
 
         return partial(make, self.env_path, self.observation_norm, self.visual_observations, self.stacked_frames, self.train_mode)
 
-    def set_num_envs(self, num_envs):
+    def set_num_actors(self, num_actors):
         if self.envs is not None:
             for env in self.envs:
                 env.close()
-        self.num_envs = num_envs
+        self.num_envs = num_actors
         env_factory = self.get_env_factory()
         self._pool = Pool(self.num_envs)
-        self.envs = self._pool.map(lambda _: env_factory(), range(num_envs))
+        self.envs = self._pool.map(lambda _: env_factory(), range(num_actors))
 
     def step(self, actions) -> BatchedStepResult:
         actions = np.split(np.asarray(actions), len(self.envs))
