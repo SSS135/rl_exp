@@ -142,7 +142,7 @@ class GradES(RLBase):
                     self._es_train()
                     self._num_completed_episodes.fill_(-1)
 
-                if self.dones is not None:
+                if self._terminal is not None:
                     self._num_completed_episodes += dones.long()
                 self._prev_data = AttrDict(**ac_out, states=states, actions=actions)
 
