@@ -2,6 +2,7 @@ import os
 import random
 from functools import partial
 from multiprocessing.dummy import Pool
+from typing import List, Optional
 
 import gym
 import gym.spaces
@@ -10,33 +11,41 @@ from mlagents_envs.base_env import BatchedStepResult, AgentGroupSpec, ActionType
 from mlagents_envs.environment import UnityEnvironment
 from mlagents_envs.exception import UnityWorkerInUseException
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel, EngineConfig
-from ppo_pytorch.common.multiplayer_env import MultiplayerEnv
-# from mlagents_envs import UnityWorkerInUseException
 from ppo_pytorch.common.env_factory import NamedVecEnv, Monitor, ObservationNorm, ChannelTranspose
 from ppo_pytorch.common.atari_wrappers import FrameStack
-# from mlagents_envs.environment import UnityEnvironment, BrainInfo, BrainParameters, AllBrainInfo
+from .variable_monitor import VariableMonitor
+
+from .variable_env import VariableEnv
+
+from .aux_reward_side_channel import AuxRewardSideChannel
+from .simple_unity_env import Command, Message, process_entry
+import multiprocessing as mp
 
 
 DEFAULT_AGENT_GROUP = 'Player'
 
 
-class UnityEnv(MultiplayerEnv):
-    def __init__(self, env_name, visual_observations=False, train_mode=True, *args, **kwargs):
+class VariableUnityEnv(VariableEnv):
+    def __init__(self, env_name, visual_observations=False, train_mode=True, *args, base_port=10000, **kwargs):
+        self.env_name = env_name
         self.visual_observations = visual_observations
         self.train_mode = train_mode
-        engine_channel = EngineConfigurationChannel()
-        engine_config = EngineConfig(80, 80, 1, 4.0, 30 * 4) if train_mode else EngineConfig(1280, 720, 1, 1.0, 60)
-        engine_channel.set_configuration(engine_config)
-        self._env = UnityEnvironment(env_name, *args, base_port=10000, side_channels=[engine_channel], **kwargs)
+
+        self._env = UnityEnvironment(env_name, *args, base_port=base_port, **kwargs,
+                                     side_channels=[self._create_engine_channel(), AuxRewardSideChannel()])
         self._env.reset()
+
         groups = self._env.get_agent_groups()
         self._agent_group = DEFAULT_AGENT_GROUP if DEFAULT_AGENT_GROUP in groups else groups[0]
-        step_result = self._env.get_step_result(self._agent_group)
         agent_spec = self._env.get_agent_group_spec(self._agent_group)
         self.observation_space = self._get_observation_space(agent_spec)
         self.action_space = self._get_action_space(agent_spec)
-        self.reward_range = (-1, 1)
-        super().__init__(len(step_result.agent_id))
+
+    def _create_engine_channel(self):
+        engine_channel = EngineConfigurationChannel()
+        engine_config = EngineConfig(80, 80, 1, 4.0, 30 * 4) if self.train_mode else EngineConfig(1280, 720, 1, 1.0, 60)
+        engine_channel.set_configuration(engine_config)
+        return engine_channel
 
     def step(self, action) -> BatchedStepResult:
         self._env.set_actions(self._agent_group, action)
@@ -56,10 +65,10 @@ class UnityEnv(MultiplayerEnv):
         self.close()
 
     def _process_brain_info(self, env_state: BatchedStepResult) -> BatchedStepResult:
-        states = env_state.obs[0]
+        obs = env_state.obs[self._obs_index]
         if self.visual_observations:
-            states = np.asarray(np.asarray(states) * 255, dtype=np.uint8)
-        return env_state._replace(obs=states)
+            obs = np.asarray(np.asarray(obs).transpose(0, 3, 1, 2) * 255, dtype=np.uint8)
+        return env_state._replace(obs=obs)
 
     def _get_action_space(self, spec: AgentGroupSpec):
         shape = spec.action_shape
@@ -71,16 +80,96 @@ class UnityEnv(MultiplayerEnv):
             return gym.spaces.MultiDiscrete(shape)
 
     def _get_observation_space(self, spec: AgentGroupSpec):
-        assert len(spec.observation_shapes) == 1
+        obs_shape, self._obs_index = next(filter(lambda s, i: len(s) == (4 if self.visual_observations else 2),
+                                                 spec.observation_shapes))
         if self.visual_observations:
-            zeros = np.zeros(spec.observation_shapes[0])
+            zeros = np.zeros(obs_shape)
             return gym.spaces.Box(zeros, zeros + 255, dtype=np.uint8)
         else:
-            ones = np.ones(spec.observation_shapes[0])
+            ones = np.ones(obs_shape)
             return gym.spaces.Box(-ones, ones, dtype=np.float32)
 
     def close(self):
         self._env.close()
+
+
+def make_env(env_path, visual_observations, no_graphics):
+    while True:
+        worker_id = random.randrange(50000)
+        try:
+            env = VariableUnityEnv(env_path, worker_id=worker_id,
+                                   visual_observations=visual_observations, no_graphics=no_graphics)
+            break
+        except UnityWorkerInUseException:
+            print(f'Worker {worker_id} already in use')
+    env = VariableMonitor(env)
+    # if stacked_frames > 1:
+    #     assert visual_observations
+    #     env = FrameStack(env, stacked_frames)
+    return env
+
+
+class VariableUnityVecEnv:
+    def __init__(self, env_path, visual_observations=False, observation_norm=False,
+                 stacked_frames=1):
+        self.env_path = env_path
+        self.visual_observations = visual_observations
+        env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
+        self.observation_norm = observation_norm
+        self.stacked_frames = stacked_frames
+        self.env_name = env_name
+        self.num_actors = None
+
+        self._processes: List[mp.Process] = []
+        self._pipes: List[mp.connection.Connection] = []
+
+        self._create_process()
+        self.observation_space, self.action_space, self.actors_per_env = self._send_message(Command.stats)[0]
+
+    def _create_process(self):
+        agent_id = len(self._processes)
+        parent_conn, child_conn = mp.Pipe()
+        env_factory = partial(self.get_env_factory(), no_graphics=False)
+        proc = mp.Process(name=f'agent {agent_id}', target=process_entry, args=(child_conn, env_factory))
+        proc.start()
+        self._processes.append(proc)
+        self._pipes.append(parent_conn)
+
+    def get_env_factory(self):
+        return partial(make_env, self.env_path, self.observation_norm, self.visual_observations, self.stacked_frames)
+
+    def set_num_actors(self, num_actors):
+        assert num_actors >= len(self._processes) * self.actors_per_env
+        assert num_actors % self.actors_per_env == 0, (num_actors, self.actors_per_env)
+
+        self.num_actors = num_actors
+        num_envs = self.num_actors // self.actors_per_env
+        while len(self._processes) < num_envs:
+            self._create_process()
+
+    def step(self, actions):
+        actions = np.split(np.asarray(actions), len(self._processes))
+        data = self._send_message(Command.step, actions)
+        return [np.stack(x, 0) for x in zip(*data)]
+
+    def reset(self):
+        data = self._send_message(Command.reset)
+        return np.stack(data, 0)
+
+    def _send_message(self, command: Command, payload: Optional[List] = None) -> List:
+        if payload is None:
+            payload = len(self._processes) * [None]
+        for pipe, payload in zip(self._pipes, payload):
+            pipe.send(Message(command, payload))
+        return [pipe.recv() for pipe in self._pipes]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._send_message(Command.shutdown)
+        for proc in self._processes:
+            proc.join(30)
 
 
 class UnityVecEnv(NamedVecEnv):
