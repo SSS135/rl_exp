@@ -1,15 +1,21 @@
+from abc import ABC, abstractmethod, ABCMeta
+import abc
+
 import gym
 import numpy as np
 from .variable_step_result import VariableStepResult
 
 
-class VariableEnv:
+class VariableEnv(metaclass=ABCMeta):
     action_space: gym.Space = None
     observation_space: gym.Space = None
+    env_name: str = None
 
+    @abstractmethod
     def step(self, action: np.ndarray) -> VariableStepResult:
         raise NotImplementedError
 
+    @abstractmethod
     def reset(self) -> VariableStepResult:
         raise NotImplementedError
 
@@ -32,3 +38,7 @@ class VariableEnv:
     def __exit__(self, *args):
         self.close()
         return False
+
+
+class VariableVecEnv(VariableEnv):
+    num_envs: int = None

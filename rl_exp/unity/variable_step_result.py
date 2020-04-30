@@ -7,16 +7,15 @@ from mlagents_envs.base_env import AgentId
 
 @dataclass
 class VariableStepResult:
-    obs: List[np.ndarray]
+    obs: np.ndarray
     rewards: np.ndarray
     done: np.ndarray
     max_step: np.ndarray
     agent_id: np.ndarray
-    action_mask: Optional[List[np.ndarray]]
     true_reward: np.ndarray
-    total_true_reward: np.ndarray
-    episode_length: np.ndarray
-    _agent_id_to_index: Optional[Dict[AgentId, int]] = field(init=False, repr=False)
+    total_true_reward: Optional[np.ndarray]
+    episode_length: Optional[np.ndarray]
+    _agent_id_to_index: Optional[Dict[AgentId, int]] = field(init=False, repr=False, default=None)
 
     @property
     def agent_id_to_index(self) -> Dict[AgentId, int]:

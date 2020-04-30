@@ -2,7 +2,7 @@ import os
 import random
 from functools import partial
 from multiprocessing.dummy import Pool
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import gym
 import gym.spaces
@@ -13,19 +13,36 @@ from mlagents_envs.exception import UnityWorkerInUseException
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel, EngineConfig
 from ppo_pytorch.common.env_factory import NamedVecEnv, Monitor, ObservationNorm, ChannelTranspose
 from ppo_pytorch.common.atari_wrappers import FrameStack
+from rl_exp.unity.variable_step_result import VariableStepResult
+
 from .variable_monitor import VariableMonitor
 
-from .variable_env import VariableEnv
+from .variable_env import VariableEnv, VariableVecEnv
 
 from .aux_reward_side_channel import AuxRewardSideChannel
-from .simple_unity_env import Command, Message, process_entry
+from .simple_unity_env import Command, Message
 import multiprocessing as mp
 
 
-DEFAULT_AGENT_GROUP = 'Player'
+def process_entry(pipe: mp.connection.Connection, env_fn):
+    env: VariableUnityEnv = env_fn()
+    while True:
+        msg: Message = pipe.recv()
+        if msg.command == Command.stats:
+            pipe.send((env.observation_space, env.action_space))
+        elif msg.command == Command.reset:
+            pipe.send(env.reset())
+        elif msg.command == Command.step:
+            pipe.send(env.step(msg.payload))
+        elif msg.command == Command.shutdown:
+            env.close()
+            pipe.send(True)
+            return
 
 
 class VariableUnityEnv(VariableEnv):
+    DEFAULT_AGENT_GROUP = 'Player'
+
     def __init__(self, env_name, visual_observations=False, train_mode=True, *args, base_port=10000, **kwargs):
         self.env_name = env_name
         self.visual_observations = visual_observations
@@ -36,27 +53,24 @@ class VariableUnityEnv(VariableEnv):
         self._env.reset()
 
         groups = self._env.get_agent_groups()
-        self._agent_group = DEFAULT_AGENT_GROUP if DEFAULT_AGENT_GROUP in groups else groups[0]
-        agent_spec = self._env.get_agent_group_spec(self._agent_group)
-        self.observation_space = self._get_observation_space(agent_spec)
-        self.action_space = self._get_action_space(agent_spec)
+        self._agent_group = self.DEFAULT_AGENT_GROUP if self.DEFAULT_AGENT_GROUP in groups else groups[0]
+        self.group_spec = self._env.get_agent_group_spec(self._agent_group)
+        self.observation_space = self._get_obs_space()
+        self.action_space = self._get_action_space()
 
-    def _create_engine_channel(self):
-        engine_channel = EngineConfigurationChannel()
-        engine_config = EngineConfig(80, 80, 1, 4.0, 30 * 4) if self.train_mode else EngineConfig(1280, 720, 1, 1.0, 60)
-        engine_channel.set_configuration(engine_config)
-        return engine_channel
-
-    def step(self, action) -> BatchedStepResult:
+    def step(self, action) -> VariableStepResult:
         self._env.set_actions(self._agent_group, action)
         self._env.step()
         res = self._env.get_step_result(self._agent_group)
         return self._process_brain_info(res)
 
-    def reset(self) -> BatchedStepResult:
+    def reset(self) -> VariableStepResult:
         self._env.reset()
         res = self._env.get_step_result(self._agent_group)
         return self._process_brain_info(res)
+
+    def close(self):
+        self._env.close()
 
     def __enter__(self):
         return self
@@ -64,33 +78,63 @@ class VariableUnityEnv(VariableEnv):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
-    def _process_brain_info(self, env_state: BatchedStepResult) -> BatchedStepResult:
-        obs = env_state.obs[self._obs_index]
+    def _process_brain_info(self, res: BatchedStepResult) -> VariableStepResult:
+        obs = self._get_vis_obs_list(res)[0] if self.visual_observations else self._get_vector_obs(res)
         if self.visual_observations:
             obs = np.asarray(np.asarray(obs).transpose(0, 3, 1, 2) * 255, dtype=np.uint8)
-        return env_state._replace(obs=obs)
+        return VariableStepResult(obs, np.expand_dims(res.reward, -1), res.done, res.max_step,
+                                  res.agent_id, res.reward, None, None)
 
-    def _get_action_space(self, spec: AgentGroupSpec):
-        shape = spec.action_shape
-        if spec.action_type == ActionType.CONTINUOUS:
-            assert isinstance(spec.action_type, int)
+    def _get_action_space(self):
+        shape = self.group_spec.action_shape
+        if self.group_spec.action_type == ActionType.CONTINUOUS:
             high = np.ones(shape)
             return gym.spaces.Box(-high, high)
         else:
             return gym.spaces.MultiDiscrete(shape)
 
-    def _get_observation_space(self, spec: AgentGroupSpec):
-        obs_shape, self._obs_index = next(filter(lambda s, i: len(s) == (4 if self.visual_observations else 2),
-                                                 spec.observation_shapes))
+    def _get_obs_space(self):
         if self.visual_observations:
-            zeros = np.zeros(obs_shape)
+            obs_shape = self._get_vis_obs_shape()
+            zeros = np.zeros(obs_shape[2], obs_shape[0], obs_shape[1])
             return gym.spaces.Box(zeros, zeros + 255, dtype=np.uint8)
         else:
-            ones = np.ones(obs_shape)
+            obs_size = self._get_vec_obs_size()
+            ones = np.ones(obs_size)
             return gym.spaces.Box(-ones, ones, dtype=np.float32)
 
-    def close(self):
-        self._env.close()
+    def _create_engine_channel(self):
+        engine_channel = EngineConfigurationChannel()
+        engine_config = EngineConfig(80, 80, 1, 4.0, 30 * 4) if self.train_mode else EngineConfig(1280, 720, 1, 1.0, 60)
+        engine_channel.set_configuration(engine_config)
+        return engine_channel
+
+    def _get_vis_obs_shape(self) -> Optional[Tuple]:
+        for shape in self.group_spec.observation_shapes:
+            if len(shape) == 3:
+                return shape
+        return None
+
+    def _get_vec_obs_size(self) -> int:
+        result = 0
+        for shape in self.group_spec.observation_shapes:
+            if len(shape) == 1:
+                result += shape[0]
+        return result
+
+    def _get_vis_obs_list(self, step_result: BatchedStepResult) -> List[np.ndarray]:
+        result: List[np.ndarray] = []
+        for obs in step_result.obs:
+            if len(obs.shape) == 4:
+                result.append(obs)
+        return result
+
+    def _get_vector_obs(self, step_result: BatchedStepResult) -> np.ndarray:
+        result: List[np.ndarray] = []
+        for obs in step_result.obs:
+            if len(obs.shape) == 2:
+                result.append(obs)
+        return np.concatenate(result, axis=1)
 
 
 def make_env(env_path, visual_observations, no_graphics):
@@ -109,52 +153,51 @@ def make_env(env_path, visual_observations, no_graphics):
     return env
 
 
-class VariableUnityVecEnv:
-    def __init__(self, env_path, visual_observations=False, observation_norm=False,
-                 stacked_frames=1):
+class VariableUnityVecEnv(VariableVecEnv):
+    def __init__(self, env_path, num_envs, visual_observations=False):
         self.env_path = env_path
         self.visual_observations = visual_observations
-        env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
-        self.observation_norm = observation_norm
-        self.stacked_frames = stacked_frames
-        self.env_name = env_name
-        self.num_actors = None
+        self.env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
 
         self._processes: List[mp.Process] = []
         self._pipes: List[mp.connection.Connection] = []
+        while len(self._processes) < num_envs:
+            self._create_process()
+        self.observation_space, self.action_space = self._send_message(Command.stats)[0]
+        self._actors_per_env = None
 
-        self._create_process()
-        self.observation_space, self.action_space, self.actors_per_env = self._send_message(Command.stats)[0]
+    @property
+    def num_envs(self):
+        return len(self._processes)
+
+    def step(self, actions: np.ndarray) -> VariableStepResult:
+        actions = np.split(np.asarray(actions), self._actors_per_env)
+        data = self._send_message(Command.step, actions)
+        return self._data_to_step_result(data)
+
+    def reset(self) -> VariableStepResult:
+        data = self._send_message(Command.reset)
+        return self._data_to_step_result(data)
+
+    def _data_to_step_result(self, data: List[VariableStepResult]) -> VariableStepResult:
+        self._actors_per_env = [len(data[0].agent_id)]
+        for x in data[1:-1]:
+            self._actors_per_env.append(len(x.agent_id) + self._actors_per_env[-1])
+
+        data = [(x.obs, x.rewards, x.done, x.max_step, x.agent_id, x.true_reward, x.total_true_reward, x.episode_length) for x in data]
+        return VariableStepResult(*[np.concatenate(x, 0) for x in zip(*data)])
 
     def _create_process(self):
         agent_id = len(self._processes)
         parent_conn, child_conn = mp.Pipe()
-        env_factory = partial(self.get_env_factory(), no_graphics=False)
+        env_factory = partial(self._get_env_factory(), no_graphics=False)
         proc = mp.Process(name=f'agent {agent_id}', target=process_entry, args=(child_conn, env_factory))
         proc.start()
         self._processes.append(proc)
         self._pipes.append(parent_conn)
 
-    def get_env_factory(self):
-        return partial(make_env, self.env_path, self.observation_norm, self.visual_observations, self.stacked_frames)
-
-    def set_num_actors(self, num_actors):
-        assert num_actors >= len(self._processes) * self.actors_per_env
-        assert num_actors % self.actors_per_env == 0, (num_actors, self.actors_per_env)
-
-        self.num_actors = num_actors
-        num_envs = self.num_actors // self.actors_per_env
-        while len(self._processes) < num_envs:
-            self._create_process()
-
-    def step(self, actions):
-        actions = np.split(np.asarray(actions), len(self._processes))
-        data = self._send_message(Command.step, actions)
-        return [np.stack(x, 0) for x in zip(*data)]
-
-    def reset(self):
-        data = self._send_message(Command.reset)
-        return np.stack(data, 0)
+    def _get_env_factory(self):
+        return partial(make_env, self.env_path, self.visual_observations)
 
     def _send_message(self, command: Command, payload: Optional[List] = None) -> List:
         if payload is None:
@@ -170,97 +213,3 @@ class VariableUnityVecEnv:
         self._send_message(Command.shutdown)
         for proc in self._processes:
             proc.join(30)
-
-
-class UnityVecEnv(NamedVecEnv):
-    def __init__(self, env_path, parallel='thread', visual_observations=False, observation_norm=False,
-                 stacked_frames=1, train_mode=True):
-        self.env_path = env_path
-        self.visual_observations = visual_observations
-        self.train_mode = train_mode
-        env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
-        self.observation_norm = observation_norm
-        self.stacked_frames = stacked_frames
-        self.env_name = env_name
-        self.parallel = parallel
-        self.envs = None
-        self.num_envs = None
-        self._pool = None
-
-        env: UnityEnv = self.get_env_factory()()
-        data = env.reset()
-        self.observation_space = env.observation_space
-        self.action_space = env.action_space
-        self._initial_num_players = len(data.agent_id)
-        env.close()
-
-    def get_env_factory(self):
-        def make(env_path, observation_norm, visual_observations, stacked_frames, train_mode):
-            while True:
-                worker_id = random.randrange(50000)
-                try:
-                    env = UnityEnv(env_path, worker_id=worker_id, visual_observations=visual_observations,
-                                   train_mode=train_mode)
-                    break
-                except UnityWorkerInUseException:
-                    print(f'Worker {worker_id} already in use')
-            env = Monitor(env)
-            if visual_observations:
-                env = ChannelTranspose(env)
-            if stacked_frames > 1:
-                assert visual_observations
-                env = FrameStack(env, 4)
-            if observation_norm:
-                env = ObservationNorm(env)
-            return env
-
-        return partial(make, self.env_path, self.observation_norm, self.visual_observations, self.stacked_frames, self.train_mode)
-
-    def set_num_actors(self, num_actors):
-        if self.envs is not None:
-            for env in self.envs:
-                env.close()
-        self.num_envs = num_actors
-        env_factory = self.get_env_factory()
-        self._pool = Pool(self.num_envs)
-        self.envs = self._pool.map(lambda _: env_factory(), range(num_actors))
-
-    def step(self, actions) -> BatchedStepResult:
-        actions = np.split(np.asarray(actions), len(self.envs))
-        data = self._pool.starmap(lambda env, a: env.step(a), zip(self.envs, actions))
-        return BatchedStepResult._make([np.concatenate(x, 0) for x in zip(*[tuple(t) for t in data])])
-
-    def reset(self) -> BatchedStepResult:
-        data = self._pool.starmap(lambda env: env.reset(), zip(self.envs))
-        return BatchedStepResult._make([np.concatenate(x, 0) for x in zip(*[tuple(t) for t in data])])
-
-    def __enter__(self):
-        self._pool.__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._pool.map(lambda env: env.close(), self.envs)
-        self._pool.__exit__()
-
-
-# class SimplifiedUnityVecEnv(UnityVecEnv):
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.num_players = self._initial_num_players
-#         self._index_to_id = {}
-#         self._prev_ids = []
-#
-#     def set_num_envs(self, num_envs):
-#         super().set_num_envs(num_envs // self.num_players)
-#
-#     def step(self, actions) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]:
-#         res = super().step(actions)
-#         if len(self._prev_ids) != len(res.agent_id):
-#
-#         return res.obs, res.reward, res.done, [dict() for _ in range(self.num_players)]
-#
-#     def reset(self) -> np.ndarray:
-#         res = super().reset()
-#         self._index_to_id = {index: id for id, index in res.agent_id_to_index.items()}
-#         self._prev_ids = res.agent_id
-#         return res.obs

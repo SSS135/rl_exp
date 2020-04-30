@@ -62,16 +62,14 @@ def make_env(env_path, observation_norm, visual_observations, stacked_frames, no
 
 
 class UnityVecEnv:
-    def __init__(self, env_path, visual_observations=False, observation_norm=False,
-                 stacked_frames=1):
+    def __init__(self, env_path, visual_observations=False, observation_norm=False, stacked_frames=1):
         self.env_path = env_path
         self.visual_observations = visual_observations
-        env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
         self.observation_norm = observation_norm
         self.stacked_frames = stacked_frames
-        self.env_name = env_name
-        self.num_actors = None
 
+        self.env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
+        self.num_actors = None
         self._processes: List[mp.Process] = []
         self._pipes: List[mp.connection.Connection] = []
 
