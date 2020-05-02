@@ -48,8 +48,10 @@ class VariableUnityEnv(VariableEnv):
         self.visual_observations = visual_observations
         self.train_mode = train_mode
 
+        self._engine_channel = self._create_engine_channel()
+        self._aux_reward_channel = AuxRewardSideChannel()
         self._env = UnityEnvironment(env_name, *args, base_port=base_port, **kwargs,
-                                     side_channels=[self._create_engine_channel(), AuxRewardSideChannel()])
+                                     side_channels=[self._engine_channel, self._aux_reward_channel])
         self._env.reset()
 
         groups = self._env.get_agent_groups()
@@ -61,13 +63,11 @@ class VariableUnityEnv(VariableEnv):
     def step(self, action) -> VariableStepResult:
         self._env.set_actions(self._agent_group, action)
         self._env.step()
-        res = self._env.get_step_result(self._agent_group)
-        return self._process_brain_info(res)
+        return self._process_step_result()
 
     def reset(self) -> VariableStepResult:
         self._env.reset()
-        res = self._env.get_step_result(self._agent_group)
-        return self._process_brain_info(res)
+        return self._process_step_result()
 
     def close(self):
         self._env.close()
@@ -78,11 +78,14 @@ class VariableUnityEnv(VariableEnv):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
-    def _process_brain_info(self, res: BatchedStepResult) -> VariableStepResult:
+    def _process_step_result(self) -> VariableStepResult:
+        res = self._env.get_step_result(self._agent_group)
+        aux_rewards = self._aux_reward_channel.collect_rewards(res.agent_id)
+        assert np.allclose(aux_rewards[:, 0], res.reward)
         obs = self._get_vis_obs_list(res)[0] if self.visual_observations else self._get_vector_obs(res)
         if self.visual_observations:
             obs = np.asarray(np.asarray(obs).transpose(0, 3, 1, 2) * 255, dtype=np.uint8)
-        return VariableStepResult(obs, np.expand_dims(res.reward, -1), res.done, res.max_step,
+        return VariableStepResult(obs, aux_rewards, res.done, res.max_step,
                                   res.agent_id, res.reward, None, None)
 
     def _get_action_space(self):
@@ -190,7 +193,7 @@ class VariableUnityVecEnv(VariableVecEnv):
     def _create_process(self):
         agent_id = len(self._processes)
         parent_conn, child_conn = mp.Pipe()
-        env_factory = partial(self._get_env_factory(), no_graphics=False)
+        env_factory = partial(self._get_env_factory(), no_graphics=agent_id > 0)
         proc = mp.Process(name=f'agent {agent_id}', target=process_entry, args=(child_conn, env_factory))
         proc.start()
         self._processes.append(proc)
