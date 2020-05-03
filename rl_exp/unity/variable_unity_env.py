@@ -1,8 +1,10 @@
 import os
 import random
+from collections import defaultdict
 from functools import partial
+from itertools import count
 from multiprocessing.dummy import Pool
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, DefaultDict
 
 import gym
 import gym.spaces
@@ -164,12 +166,14 @@ class VariableUnityVecEnv(VariableVecEnv):
         self.no_graphics = no_graphics
         self.env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
 
+        self._actors_per_env = None
+        self._env_to_global_agent_id: List[DefaultDict[int, int]] = []
+        self._agent_id_counter = count()
         self._processes: List[mp.Process] = []
         self._pipes: List[mp.connection.Connection] = []
         while len(self._processes) < num_envs:
             self._create_process()
         self.observation_space, self.action_space = self._send_message(Command.stats)[0]
-        self._actors_per_env = None
 
     @property
     def num_envs(self):
@@ -185,10 +189,23 @@ class VariableUnityVecEnv(VariableVecEnv):
         return self._data_to_step_result(data)
 
     def _data_to_step_result(self, data: List[VariableStepResult]) -> VariableStepResult:
+        self._calc_actors_per_env(data)
+        self._fix_agent_id(data)
+        return self._cat_env_data(data)
+
+    def _calc_actors_per_env(self, data: List[VariableStepResult]):
         self._actors_per_env = [len(data[0].agent_id)]
         for x in data[1:-1]:
             self._actors_per_env.append(len(x.agent_id) + self._actors_per_env[-1])
 
+    def _fix_agent_id(self, data: List[VariableStepResult]):
+        for env_res, aid_map in zip(data, self._env_to_global_agent_id):
+            env_res.agent_id = [aid_map[aid] for aid in env_res.agent_id]
+            for aid, done in zip(env_res.agent_id, env_res.done):
+                if done and aid in aid_map:
+                    del aid_map[aid]
+
+    def _cat_env_data(self, data: List[VariableStepResult]) -> VariableStepResult:
         data = [(x.obs, x.rewards, x.done, x.max_step, x.agent_id, x.true_reward, x.total_true_reward, x.episode_length) for x in data]
         step = VariableStepResult(*[np.concatenate(x, 0) for x in zip(*data)])
         assert len(step.agent_id) == len(set(step.agent_id)), step.agent_id
@@ -203,6 +220,7 @@ class VariableUnityVecEnv(VariableVecEnv):
         proc.start()
         self._processes.append(proc)
         self._pipes.append(parent_conn)
+        self._env_to_global_agent_id.append(defaultdict(lambda: next(self._agent_id_counter)))
 
     def _send_message(self, command: Command, payload: Optional[List] = None) -> List:
         if payload is None:
