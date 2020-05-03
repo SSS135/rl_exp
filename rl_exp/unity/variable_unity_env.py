@@ -82,7 +82,7 @@ class VariableUnityEnv(VariableEnv):
     def _process_step_result(self) -> VariableStepResult:
         res = self._env.get_step_result(self._agent_group)
         aux_rewards = self._aux_reward_channel.collect_rewards(res.agent_id)
-        assert np.allclose(aux_rewards[:, 0], res.reward)
+        assert np.allclose(aux_rewards[:, 0], res.reward), (aux_rewards, res.reward)
         obs = self._get_vis_obs_list(res)[0] if self.visual_observations else self._get_vector_obs(res)
         if self.visual_observations:
             obs = np.asarray(np.asarray(obs).transpose(0, 3, 1, 2) * 255, dtype=np.uint8)
@@ -157,10 +157,11 @@ def make_env(env_path, visual_observations, stacked_frames, no_graphics):
 
 
 class VariableUnityVecEnv(VariableVecEnv):
-    def __init__(self, env_path, num_envs, visual_observations=False, stacked_frames=1):
+    def __init__(self, env_path, num_envs, visual_observations=False, stacked_frames=1, no_graphics=False):
         self.env_path = env_path
         self.visual_observations = visual_observations
         self.stacked_frames = stacked_frames
+        self.no_graphics = no_graphics
         self.env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
 
         self._processes: List[mp.Process] = []
@@ -189,19 +190,19 @@ class VariableUnityVecEnv(VariableVecEnv):
             self._actors_per_env.append(len(x.agent_id) + self._actors_per_env[-1])
 
         data = [(x.obs, x.rewards, x.done, x.max_step, x.agent_id, x.true_reward, x.total_true_reward, x.episode_length) for x in data]
-        return VariableStepResult(*[np.concatenate(x, 0) for x in zip(*data)])
+        step = VariableStepResult(*[np.concatenate(x, 0) for x in zip(*data)])
+        assert len(step.agent_id) == len(set(step.agent_id)), step.agent_id
+        return step
 
     def _create_process(self):
         agent_id = len(self._processes)
         parent_conn, child_conn = mp.Pipe()
-        env_factory = partial(self._get_env_factory(), no_graphics=agent_id > 0)
+        env_factory = partial(make_env, self.env_path, self.visual_observations,
+                              self.stacked_frames, no_graphics=self.no_graphics)
         proc = mp.Process(name=f'agent {agent_id}', target=process_entry, args=(child_conn, env_factory))
         proc.start()
         self._processes.append(proc)
         self._pipes.append(parent_conn)
-
-    def _get_env_factory(self):
-        return partial(make_env, self.env_path, self.visual_observations, self.stacked_frames)
 
     def _send_message(self, command: Command, payload: Optional[List] = None) -> List:
         if payload is None:
