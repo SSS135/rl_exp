@@ -13,6 +13,7 @@ from mlagents_envs.exception import UnityWorkerInUseException
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel, EngineConfig
 from ppo_pytorch.common.env_factory import NamedVecEnv, Monitor, ObservationNorm, ChannelTranspose
 from ppo_pytorch.common.atari_wrappers import FrameStack
+from rl_exp.unity.variable_frame_stack import VariableFrameStack
 from rl_exp.unity.variable_step_result import VariableStepResult
 
 from .variable_monitor import VariableMonitor
@@ -99,7 +100,7 @@ class VariableUnityEnv(VariableEnv):
     def _get_obs_space(self):
         if self.visual_observations:
             obs_shape = self._get_vis_obs_shape()
-            zeros = np.zeros(obs_shape[2], obs_shape[0], obs_shape[1])
+            zeros = np.zeros((obs_shape[2], obs_shape[0], obs_shape[1]))
             return gym.spaces.Box(zeros, zeros + 255, dtype=np.uint8)
         else:
             obs_size = self._get_vec_obs_size()
@@ -140,7 +141,7 @@ class VariableUnityEnv(VariableEnv):
         return np.concatenate(result, axis=1)
 
 
-def make_env(env_path, visual_observations, no_graphics):
+def make_env(env_path, visual_observations, stacked_frames, no_graphics):
     while True:
         worker_id = random.randrange(50000)
         try:
@@ -150,16 +151,16 @@ def make_env(env_path, visual_observations, no_graphics):
         except UnityWorkerInUseException:
             print(f'Worker {worker_id} already in use')
     env = VariableMonitor(env)
-    # if stacked_frames > 1:
-    #     assert visual_observations
-    #     env = FrameStack(env, stacked_frames)
+    if stacked_frames > 1:
+        env = VariableFrameStack(env, stacked_frames)
     return env
 
 
 class VariableUnityVecEnv(VariableVecEnv):
-    def __init__(self, env_path, num_envs, visual_observations=False):
+    def __init__(self, env_path, num_envs, visual_observations=False, stacked_frames=1):
         self.env_path = env_path
         self.visual_observations = visual_observations
+        self.stacked_frames = stacked_frames
         self.env_name = os.path.basename(os.path.split(os.path.normpath(env_path))[0])
 
         self._processes: List[mp.Process] = []
@@ -200,7 +201,7 @@ class VariableUnityVecEnv(VariableVecEnv):
         self._pipes.append(parent_conn)
 
     def _get_env_factory(self):
-        return partial(make_env, self.env_path, self.visual_observations)
+        return partial(make_env, self.env_path, self.visual_observations, self.stacked_frames)
 
     def _send_message(self, command: Command, payload: Optional[List] = None) -> List:
         if payload is None:
